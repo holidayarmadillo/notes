@@ -1,0 +1,148 @@
+repository: https://github.com/holidayarmadillo/notes.git
+
+The intention of this code is to figure out a relation between kernel task and the task->mm.
+
+Observation and Inferences:
+
+- Kernel threads do not have an address space. Their mm pointer, which points at their address space, is NULL.
+- A ko file is something that runs in the kernel mode. But insmod is the user process that loads the ko module.
+  Hence, `task->mm` will be valid entry while the `task->flags & PF_KTHREAD` defines it is not a kernel thread
+  i.e., purely a kernel task
+
+===================================================================================================
+		(current & PF_KTHREAD)		task->mm		Remarks
+		0 - kernel thread
+		1 - not a kernel thread
+===================================================================================================
+
+insmod driver	-	0			valid address		insmod is userspace process
+kthread		-	1			 ((null))		kthread is pure kernel task
+
+===================================================================================================================
+EXAMPLE I
+===================================================================================================================
+
+file: sample.c
+
+#include <linux/module.h>    // included for all kernel modules
+#include <linux/kernel.h>    // included for KERN_INFO
+#include <linux/init.h>      // included for __init and __exit macros
+#include <linux/sched.h>
+
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Aditya Paluri");
+MODULE_DESCRIPTION("A Simple Hello World module");
+
+static int __init hello_init(void)
+{
+    printk(KERN_INFO "file: %s: proc name: %s\n", __FILE__, current->comm);
+    /* if current->flags == PF_KTHREAD, then it means it's a kernel thread.
+     * Kernel threads do not have an address space. Their mm pointer, which
+     * points at their address space, is NULL, hence, current->mm must be NULL
+     * if its a kernel thread.
+     */
+    printk("(current->flags & PF_KTHREAD): %d current->mm: %p)\n", (current->flags & PF_KTHREAD), current->mm);
+    return 0;    // Non-zero return means that the module couldn't be loaded.
+}
+
+static void __exit hello_cleanup(void)
+{
+    printk(KERN_INFO "Cleaning up module.\n");
+}
+
+module_init(hello_init);
+module_exit(hello_cleanup);
+
+===================================================================================================================
+EXAMPLE II
+===================================================================================================================
+
+file: sample_1.c
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/kthread.h>
+
+MODULE_LICENSE("GPL");
+
+static int test_run(void *data)
+{
+        printk(KERN_INFO "file: %s: proc name: %s\n", __FILE__, current->comm);
+        printk("(current->flags & PF_KTHREAD): %d current->mm: %p)\n", (current->flags & PF_KTHREAD), current->mm);
+	return 0;
+}
+
+static int __init hello_init(void)
+{
+	struct task_struct *t;
+        /* if current->flags == PF_KTHREAD, then it means it's a kernel thread.
+         * Kernel threads do not have an address space. Their mm pointer, which
+         * points at their address space, is NULL, hence, current->mm must be NULL
+         * if its a kernel thread.
+         */
+	t = kthread_create(test_run, NULL, "test_run");
+
+	if (IS_ERR(t)) {
+		printk(KERN_EMERG "Could not start kernel thread\n");
+		return -ENOMEM;
+	}
+
+	wake_up_process(t);
+        printk(KERN_INFO "file: %s: proc name: %s\n", __FILE__, current->comm);
+        printk("(current->flags & PF_KTHREAD): %d current->mm: %p)\n", (current->flags & PF_KTHREAD), current->mm);
+	return 0;
+}
+
+static void __exit hello_cleanup(void)
+{
+       printk(KERN_EMERG "Cleaning up module.\n");
+}
+
+module_init(hello_init);
+module_exit(hello_cleanup);
+
+===================================================================================================================
+Makefile
+===================================================================================================================
+
+file: Makefile
+
+
+export ARCH=arm
+export CROSS_COMPILE=/opt/tooling/codesourcery/MGC-2015.12-159-arm-gcc-5.2.0/Sourcery_CodeBench_for_ARM_Embedded/bin/arm-none-linux-gnueabi-
+KDIR := /home/apaluri/Adit/imx6/g33/linux
+
+obj-m := sample.o sample_1.o
+PWD := $(shell pwd)
+default:
+	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
+clean:
+	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) clean
+
+===================================================================================================================
+
+Steps:
+
+1. Use makefile to compile both the programs
+	make -f Makefile
+2. Copy them(sample.ko and sample_1.ko) to the ARM target
+3. Insert the modules and observe the output in dmesg logs
+	insmod sample.ko
+	insmod sample_1.ko
+
+===================================================================================================================
+Output
+===================================================================================================================
+
+root@mx6q:~# dmesg
+[ 4991.412279] sample.ko:: proc name: insmod!
+[ 4991.417136] (current->flags & PF_KTHREAD): 0 current->mm: d99a5180)
+[ 5005.274348] sample_1:: proc name: insmod
+[ 5005.279012] sample_1 kthread:: proc name: test_run
+[ 5005.282561] sample_1:: (current->flags & PF_KTHREAD): 0 current->mm: d9038000)
+[ 5005.291433] sample_1 kthread:: (current->flags & PF_KTHREAD): 2097152 current->mm:   (null))
+root@mx6q:~# 
+
+===================================================================================================================
