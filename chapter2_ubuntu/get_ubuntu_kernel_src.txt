@@ -1,0 +1,37 @@
+1. Fetch linux kernel source code for present kernel version
+
+Run the below command in ubuntu terminal
+
+#> software-properties-gtk
+
+Under the "Ubuntu software" tab, select "Source code" and click on close
+
+Create a separate folder where the linux sources must be downloaded
+Example: mkdir -p ~/linux-source
+
+#> cd ~/linux-source
+#> apt-get source linux
+
+The above command downloads tar file into the location
+
+To fetch specific kernel version sources, do as shown below:
+
+#> apt-get source linux-image-`uname -r`
+[OR]
+#> git clone git://kernel.ubuntu.com/ubuntu/ubuntu-<release codename>.git
+
+2. Compile linux kernel
+
+Fetch your system's architecture
+#> uname -m
+x86
+#> export ARCH=x86
+#> make menuconfig
+#> make
+
+You might need to download libncurses, obssl, penssl, etc
+
+#> apt-get update && apt-get install libssl-dev
+#> apt-get install build-essential
+#> apt-get install openssl
+#> apt-get install libncurses5-dev
